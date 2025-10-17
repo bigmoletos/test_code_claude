@@ -1,0 +1,62 @@
+<div class="container">
+  <div class="header">
+    <h1>Tâches de Synchronisation</h1>
+    <button class="btn btn-primary" routerLink="/tasks/new">+ Nouvelle Tâche</button>
+  </div>
+
+  <div class="tasks-grid" *ngIf="tasks.length > 0; else noTasks">
+    <div class="task-card" *ngFor="let task of tasks">
+      <div class="task-header">
+        <h3>{{ task.name }}</h3>
+        <span class="status-badge" [class.active]="task.active" [class.inactive]="!task.active">
+          {{ task.active ? 'Active' : 'Inactive' }}
+        </span>
+      </div>
+
+      <div class="task-info">
+        <div class="info-row">
+          <span class="label">Source:</span>
+          <span class="value">{{ task.sourcePath }}</span>
+        </div>
+        <div class="info-row">
+          <span class="label">Destination:</span>
+          <span class="value">{{ task.destinationPath }}</span>
+        </div>
+        <div class="info-row">
+          <span class="label">Intervalle:</span>
+          <span class="value">{{ task.intervalMinutes }} minutes</span>
+        </div>
+        <div class="info-row">
+          <span class="label">Dernière sync:</span>
+          <span class="value">{{ formatDate(task.lastSyncTime) }}</span>
+        </div>
+        <div class="info-row">
+          <span class="label">Prochaine sync:</span>
+          <span class="value">{{ formatDate(task.nextSyncTime) }}</span>
+        </div>
+      </div>
+
+      <div class="task-actions">
+        <button
+          class="btn btn-success"
+          (click)="triggerSync(task)"
+          [disabled]="syncStatuses.get(task.id!) || !task.active">
+          {{ syncStatuses.get(task.id!) ? 'En cours...' : 'Synchroniser' }}
+        </button>
+        <button class="btn btn-secondary" (click)="toggleTask(task)">
+          {{ task.active ? 'Désactiver' : 'Activer' }}
+        </button>
+        <button class="btn btn-info" (click)="viewLogs(task)">Logs</button>
+        <button class="btn btn-warning" [routerLink]="['/tasks/edit', task.id]">Modifier</button>
+        <button class="btn btn-danger" (click)="deleteTask(task)">Supprimer</button>
+      </div>
+    </div>
+  </div>
+
+  <ng-template #noTasks>
+    <div class="no-tasks">
+      <p>Aucune tâche de synchronisation configurée.</p>
+      <button class="btn btn-primary" routerLink="/tasks/new">Créer une tâche</button>
+    </div>
+  </ng-template>
+</div>

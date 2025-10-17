@@ -1,0 +1,81 @@
+<div class="container">
+  <div class="header">
+    <h1>{{ taskId ? 'Logs de la Tâche' : 'Tous les Logs' }}</h1>
+    <button class="btn btn-secondary" routerLink="/tasks">Retour aux tâches</button>
+  </div>
+
+  <div class="logs-container" *ngIf="logs.length > 0; else noLogs">
+    <div class="log-card" *ngFor="let log of logs">
+      <div class="log-header">
+        <div>
+          <h3>{{ log.syncTaskName }}</h3>
+          <span class="log-date">{{ formatDate(log.startTime) }}</span>
+        </div>
+        <span class="status-badge" [ngClass]="getStatusClass(log.status)">
+          {{ log.status }}
+        </span>
+      </div>
+
+      <div class="log-stats">
+        <div class="stat">
+          <span class="stat-label">Scannés</span>
+          <span class="stat-value">{{ log.filesScanned }}</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Copiés</span>
+          <span class="stat-value">{{ log.filesCopied }}</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Mis à jour</span>
+          <span class="stat-value">{{ log.filesUpdated }}</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Supprimés</span>
+          <span class="stat-value">{{ log.filesDeleted }}</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Ignorés</span>
+          <span class="stat-value">{{ log.filesSkipped }}</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Volume</span>
+          <span class="stat-value">{{ formatBytes(log.totalBytes) }}</span>
+        </div>
+        <div class="stat">
+          <span class="stat-label">Durée</span>
+          <span class="stat-value">{{ getDuration(log) }}</span>
+        </div>
+      </div>
+
+      <div class="log-details" *ngIf="log.details">
+        <strong>Détails:</strong> {{ log.details }}
+      </div>
+
+      <div class="log-error" *ngIf="log.errorMessage">
+        <strong>Erreur:</strong> {{ log.errorMessage }}
+      </div>
+    </div>
+
+    <div class="pagination" *ngIf="totalPages > 1">
+      <button
+        class="btn btn-secondary"
+        (click)="previousPage()"
+        [disabled]="currentPage === 0">
+        ← Précédent
+      </button>
+      <span class="page-info">Page {{ currentPage + 1 }} / {{ totalPages }}</span>
+      <button
+        class="btn btn-secondary"
+        (click)="nextPage()"
+        [disabled]="currentPage >= totalPages - 1">
+        Suivant →
+      </button>
+    </div>
+  </div>
+
+  <ng-template #noLogs>
+    <div class="no-logs">
+      <p>Aucun log disponible.</p>
+    </div>
+  </ng-template>
+</div>

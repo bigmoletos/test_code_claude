@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../../outils_dev/outils"
+		}
+	],
+	"settings": {}
+}

@@ -1,34 +1,34 @@
-# Environment variables
+# Environment files
 .env
-.env.local
-.env.*.local
+*.env
+.env*local*
 
-# Dependencies
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
+# Backend (Maven/Spring Boot)
+backend/target/
+backend/.mvn/
+backend/mvnw
+backend/mvnw.cmd
+backend/data/
+backend/*.log
+backend/apache-maven-*/
+backend/maven-temp.zip
+# Scripts (garder dans le dépôt)
+# scripts/ est intentionnellement non ignoré
+
+# Frontend (Angular)
+frontend/node_modules/
+frontend/dist/
+frontend/.angular/
+frontend/*.log
 
 # IDE
-.vscode/
 .idea/
-*.swp
-*.swo
-*~
-
-# OS
+.vscode/
+*.iml
+*.iws
+*.ipr
 .DS_Store
-Thumbs.db
 
 # Logs
 logs/
 *.log
-
-# Python
-__pycache__/
-*.py[cod]
-*.so
-.Python
-venv/
-env/
-

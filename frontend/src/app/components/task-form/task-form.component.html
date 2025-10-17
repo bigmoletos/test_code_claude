@@ -1,0 +1,88 @@
+<div class="container">
+  <div class="header">
+    <h1>{{ isEditMode ? 'Modifier' : 'Créer' }} une Tâche de Synchronisation</h1>
+  </div>
+
+  <form (ngSubmit)="onSubmit()" class="task-form">
+    <div class="form-group">
+      <label for="name">Nom de la tâche *</label>
+      <input
+        type="text"
+        id="name"
+        [(ngModel)]="task.name"
+        name="name"
+        required
+        placeholder="Ex: Sauvegarde Documents"
+        class="form-control">
+    </div>
+
+    <div class="form-group">
+      <label for="sourcePath">Chemin source *</label>
+      <input
+        type="text"
+        id="sourcePath"
+        [(ngModel)]="task.sourcePath"
+        name="sourcePath"
+        required
+        placeholder="Ex: C:\Users\Documents ou /home/user/documents"
+        class="form-control">
+      <small>Chemin absolu du dossier à synchroniser</small>
+    </div>
+
+    <div class="form-group">
+      <label for="destinationPath">Chemin de destination *</label>
+      <input
+        type="text"
+        id="destinationPath"
+        [(ngModel)]="task.destinationPath"
+        name="destinationPath"
+        required
+        placeholder="Ex: D:\Backup\Documents ou /backup/documents"
+        class="form-control">
+      <small>Chemin absolu du dossier de destination</small>
+    </div>
+
+    <div class="form-group">
+      <label for="intervalMinutes">Intervalle de synchronisation (minutes) *</label>
+      <input
+        type="number"
+        id="intervalMinutes"
+        [(ngModel)]="task.intervalMinutes"
+        name="intervalMinutes"
+        required
+        min="1"
+        class="form-control">
+      <small>Temps entre chaque synchronisation automatique (120 = 2 heures)</small>
+    </div>
+
+    <div class="form-group checkbox-group">
+      <label>
+        <input
+          type="checkbox"
+          [(ngModel)]="task.active"
+          name="active">
+        Activer la tâche
+      </label>
+    </div>
+
+    <div class="form-group checkbox-group">
+      <label>
+        <input
+          type="checkbox"
+          [(ngModel)]="task.useChecksum"
+          name="useChecksum">
+        Utiliser le checksum (SHA-256) pour détecter les modifications
+      </label>
+      <small>Plus précis mais plus lent. Si désactivé, seule la date de modification est utilisée.</small>
+    </div>
+
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">
+        {{ isEditMode ? 'Mettre à jour' : 'Créer' }}
+      </button>
+      <button type="button" class="btn btn-secondary" routerLink="/tasks">
+        Annuler
+      </button>
+    </div>
+  </form>
+</div>
