@@ -5,8 +5,9 @@ import com.sync.app.entity.SyncLog;
 import com.sync.app.entity.SyncTask;
 import com.sync.app.repository.FileMetadataRepository;
 import com.sync.app.repository.SyncLogRepository;
+import com.sync.app.util.CustomLogger;
+import com.sync.app.util.CustomLogger.LogLevel;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,9 +26,18 @@ import java.util.concurrent.atomic.AtomicLong;
  * Service principal pour gérer la synchronisation de fichiers.
  */
 @Service
-@Slf4j
 @RequiredArgsConstructor
 public class FileSyncService {
+    private static final CustomLogger logger = CustomLogger.getLogger("FileSyncService");
+
+    static {
+        logger.setLevel(LogLevel.DEBUG)
+              .setConsoleOutput(true)
+              .setLogFile("./logs/file-sync.log")
+              .setMaxFileSize(20 * 1024 * 1024) // 20MB
+              .setMaxBackupFiles(10)
+              .setCompressionEnabled(true);
+    }
 
     private final FileMetadataRepository fileMetadataRepository;
     private final SyncLogRepository syncLogRepository;
@@ -52,7 +62,7 @@ public class FileSyncService {
             char driveLetter = Character.toLowerCase(path.charAt(0));
             String pathWithoutDrive = path.substring(2); // Enlève "C:"
             String wslPath = "/mnt/" + driveLetter + pathWithoutDrive.replace("\\", "/");
-            log.info("Conversion chemin Windows -> WSL: {} -> {}", path, wslPath);
+            logger.info("Conversion chemin Windows -> WSL: {} -> {}", path, wslPath);
             return wslPath;
         }
 
@@ -63,8 +73,14 @@ public class FileSyncService {
      * Exécute une synchronisation pour une tâche donnée.
      */
     public SyncLog executeSync(SyncTask syncTask) {
+        logger.info("=== Début de synchronisation ===");
+        logger.info("Tâche: {} (ID: {})", syncTask.getName(), syncTask.getId());
+        logger.info("Source: {}", syncTask.getSourcePath());
+        logger.info("Destination: {}", syncTask.getDestinationPath());
+        logger.info("Utiliser checksum: {}", syncTask.getUseChecksum());
+
         if (!runningSyncs.add(syncTask.getId())) {
-            log.warn("Sync already running for task: {}", syncTask.getId());
+            logger.warn("Synchronisation déjà en cours pour la tâche: {} (ID: {})", syncTask.getName(), syncTask.getId());
             return null;
         }
 
@@ -73,6 +89,7 @@ public class FileSyncService {
         syncLog.setStartTime(LocalDateTime.now());
         syncLog.setStatus(SyncLog.SyncStatus.RUNNING);
         final SyncLog finalSyncLog = syncLogRepository.save(syncLog);
+        logger.debug("SyncLog créé avec ID: {}", finalSyncLog.getId());
 
         try {
             // Conversion des chemins Windows vers WSL si nécessaire
@@ -84,23 +101,30 @@ public class FileSyncService {
 
             // Validation des chemins
             if (!Files.exists(sourcePath)) {
+                logger.error("Le chemin source n'existe pas: {}", sourcePath);
                 throw new IOException("Le chemin source n'existe pas: " + sourcePath);
             }
+            logger.debug("Chemin source validé: {}", sourcePath);
 
             if (!Files.exists(destPath)) {
+                logger.info("Création du répertoire de destination: {}", destPath);
                 Files.createDirectories(destPath);
             }
+            logger.debug("Chemin destination validé: {}", destPath);
 
             // Récupération des métadonnées existantes
             Map<String, FileMetadata> existingMetadata = new HashMap<>();
             fileMetadataRepository.findBySyncTask(syncTask).forEach(fm ->
                 existingMetadata.put(fm.getFilePath(), fm)
             );
+            logger.info("Métadonnées existantes chargées: {} fichiers", existingMetadata.size());
 
             Set<String> processedFiles = new HashSet<>();
             SyncStats stats = new SyncStats();
             AtomicLong lastLogTime = new AtomicLong(System.currentTimeMillis());
             AtomicLong lastDbUpdateTime = new AtomicLong(System.currentTimeMillis());
+
+            logger.info("Début du parcours des fichiers source...");
 
             // Parcours des fichiers source
             Files.walkFileTree(sourcePath, new SimpleFileVisitor<Path>() {
@@ -142,7 +166,7 @@ public class FileSyncService {
 
                         // Log console tous les 100 fichiers
                         if (currentTime - lastLogTime.get() > 5000) { // au moins toutes les 5 secondes
-                            log.info("Progression: {} fichiers scannés, {} copiés, {} mis à jour, {} ignorés",
+                            logger.info("Progression: {} fichiers scannés, {} copiés, {} mis à jour, {} ignorés",
                                 stats.filesScanned, stats.filesCopied, stats.filesUpdated, stats.filesSkipped);
                             lastLogTime.set(currentTime);
                         }
@@ -176,20 +200,32 @@ public class FileSyncService {
             });
 
             // Suppression des fichiers qui n'existent plus dans la source
+            logger.info("Vérification des fichiers supprimés de la source...");
+            int deletedCount = 0;
             for (String metaPath : existingMetadata.keySet()) {
                 if (!processedFiles.contains(metaPath)) {
                     Path fileToDelete = destPath.resolve(metaPath);
                     if (Files.exists(fileToDelete)) {
+                        logger.debug("Suppression du fichier: {}", metaPath);
                         Files.delete(fileToDelete);
                         stats.filesDeleted++;
+                        deletedCount++;
                     }
                     fileMetadataRepository.delete(existingMetadata.get(metaPath));
                 }
             }
+            if (deletedCount > 0) {
+                logger.info("{} fichiers supprimés (absents de la source)", deletedCount);
+            }
 
             // Log final de la progression
-            log.info("Synchronisation terminée: {} fichiers scannés, {} copiés, {} mis à jour, {} supprimés, {} ignorés",
-                stats.filesScanned, stats.filesCopied, stats.filesUpdated, stats.filesDeleted, stats.filesSkipped);
+            logger.info("=== Synchronisation terminée ===");
+            logger.info("Fichiers scannés: {}", stats.filesScanned);
+            logger.info("Fichiers copiés: {}", stats.filesCopied);
+            logger.info("Fichiers mis à jour: {}", stats.filesUpdated);
+            logger.info("Fichiers supprimés: {}", stats.filesDeleted);
+            logger.info("Fichiers ignorés (inchangés): {}", stats.filesSkipped);
+            logger.info("Volume total: {} octets ({} MB)", stats.totalBytes, stats.totalBytes / (1024 * 1024));
 
             // Finalisation du log
             finalSyncLog.setEndTime(LocalDateTime.now());
@@ -205,12 +241,13 @@ public class FileSyncService {
             return syncLogRepository.save(finalSyncLog);
 
         } catch (Exception e) {
-            log.error("Erreur lors de la synchronisation", e);
+            logger.error("Erreur lors de la synchronisation de la tâche: {}", syncTask.getName(), e);
             finalSyncLog.setEndTime(LocalDateTime.now());
             finalSyncLog.setStatus(SyncLog.SyncStatus.FAILED);
             finalSyncLog.setErrorMessage(e.getMessage());
             return syncLogRepository.save(finalSyncLog);
         } finally {
+            logger.debug("Synchronisation terminée pour la tâche ID: {}", syncTask.getId());
             runningSyncs.remove(syncTask.getId());
         }
     }
@@ -220,6 +257,7 @@ public class FileSyncService {
      */
     private boolean shouldCopyFile(Path sourceFile, Path destFile, FileMetadata existing, boolean useChecksum) throws IOException {
         if (!Files.exists(destFile)) {
+            logger.trace("Fichier {} n'existe pas à la destination -> copie nécessaire", sourceFile.getFileName());
             return true;
         }
 
@@ -228,6 +266,8 @@ public class FileSyncService {
 
         // Comparaison par taille
         if (sourceAttrs.size() != destAttrs.size()) {
+            logger.trace("Taille différente pour {} ({} vs {}) -> copie nécessaire",
+                sourceFile.getFileName(), sourceAttrs.size(), destAttrs.size());
             return true;
         }
 
@@ -237,13 +277,18 @@ public class FileSyncService {
         );
 
         if (existing != null && !sourceModified.equals(existing.getLastModified())) {
+            logger.trace("Date de modification différente pour {} -> copie nécessaire", sourceFile.getFileName());
             return true;
         }
 
         // Comparaison par checksum si activé
         if (useChecksum && existing != null) {
             String currentChecksum = calculateChecksum(sourceFile);
-            return !currentChecksum.equals(existing.getChecksum());
+            boolean checksumDifferent = !currentChecksum.equals(existing.getChecksum());
+            if (checksumDifferent) {
+                logger.trace("Checksum différent pour {} -> copie nécessaire", sourceFile.getFileName());
+            }
+            return checksumDifferent;
         }
 
         return false;
@@ -254,6 +299,7 @@ public class FileSyncService {
      */
     private String calculateChecksum(Path file) throws IOException {
         try {
+            logger.trace("Calcul du checksum pour: {}", file.getFileName());
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] buffer = new byte[chunkSize];
 
@@ -269,8 +315,11 @@ public class FileSyncService {
             for (byte b : hashBytes) {
                 sb.append(String.format("%02x", b));
             }
-            return sb.toString();
+            String checksum = sb.toString();
+            logger.trace("Checksum calculé: {} pour {}", checksum.substring(0, 8) + "...", file.getFileName());
+            return checksum;
         } catch (Exception e) {
+            logger.error("Erreur lors du calcul du checksum pour: {}", file.getFileName(), e);
             throw new IOException("Erreur lors du calcul du checksum", e);
         }
     }
@@ -296,7 +345,7 @@ public class FileSyncService {
             try {
                 metadata.setChecksum(calculateChecksum(file));
             } catch (IOException e) {
-                log.warn("Impossible de calculer le checksum pour: {}", relativePath);
+                logger.warn("Impossible de calculer le checksum pour: {}", relativePath, e);
             }
         }
 
@@ -317,7 +366,7 @@ public class FileSyncService {
             syncLog.setDetails(String.format("En cours: %d fichiers scannés...", stats.filesScanned));
             syncLogRepository.save(syncLog);
         } catch (Exception e) {
-            log.warn("Erreur lors de la mise à jour de la progression: {}", e.getMessage());
+            logger.warn("Erreur lors de la mise à jour de la progression: {}", e.getMessage());
         }
     }
 
@@ -325,7 +374,9 @@ public class FileSyncService {
      * Vérifie si une synchronisation est en cours.
      */
     public boolean isSyncRunning(Long taskId) {
-        return runningSyncs.contains(taskId);
+        boolean isRunning = runningSyncs.contains(taskId);
+        logger.debug("Vérification synchronisation en cours pour tâche ID {}: {}", taskId, isRunning);
+        return isRunning;
     }
 
     /**

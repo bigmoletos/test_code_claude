@@ -2,8 +2,9 @@ package com.sync.app.service;
 
 import com.sync.app.entity.SyncTask;
 import com.sync.app.repository.SyncTaskRepository;
+import com.sync.app.util.CustomLogger;
+import com.sync.app.util.CustomLogger.LogLevel;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,9 +16,18 @@ import java.util.List;
  * Service pour gérer la planification automatique des synchronisations.
  */
 @Service
-@Slf4j
 @RequiredArgsConstructor
 public class SyncSchedulerService {
+    private static final CustomLogger logger = CustomLogger.getLogger("SyncSchedulerService");
+
+    static {
+        logger.setLevel(LogLevel.INFO)
+              .setConsoleOutput(true)
+              .setLogFile("./logs/sync-scheduler.log")
+              .setMaxFileSize(10 * 1024 * 1024) // 10MB
+              .setMaxBackupFiles(5)
+              .setCompressionEnabled(true);
+    }
 
     private final SyncTaskRepository syncTaskRepository;
     private final FileSyncService fileSyncService;
@@ -28,17 +38,23 @@ public class SyncSchedulerService {
     @Scheduled(fixedRate = 60000) // Toutes les minutes
     @Transactional
     public void checkAndExecutePendingTasks() {
-        log.debug("Vérification des tâches de synchronisation...");
+        logger.debug("Vérification des tâches de synchronisation planifiées...");
 
         List<SyncTask> tasks = syncTaskRepository
             .findByActiveTrueAndNextSyncTimeBefore(LocalDateTime.now());
 
+        if (!tasks.isEmpty()) {
+            logger.info("Trouvé {} tâche(s) en attente d'exécution", tasks.size());
+        }
+
         for (SyncTask task : tasks) {
             if (!fileSyncService.isSyncRunning(task.getId())) {
-                log.info("Démarrage de la synchronisation pour: {}", task.getName());
+                logger.info("Démarrage de la synchronisation planifiée pour: {} (ID: {})", task.getName(), task.getId());
 
                 // Exécution asynchrone pour ne pas bloquer le scheduler
                 executeTaskAsync(task);
+            } else {
+                logger.warn("Synchronisation déjà en cours pour: {} - tâche ignorée", task.getName());
             }
         }
     }
@@ -51,25 +67,32 @@ public class SyncSchedulerService {
         final String taskName = task.getName();
         final Long intervalMinutes = task.getIntervalMinutes();
 
+        logger.debug("Création thread asynchrone pour tâche: {}", taskName);
+
         new Thread(() -> {
             try {
+                logger.info("Thread de synchronisation démarré pour: {}", taskName);
+
                 // Récupérer à nouveau la tâche dans le contexte du nouveau thread
                 SyncTask taskInThread = syncTaskRepository.findById(taskId).orElse(null);
                 if (taskInThread == null) {
-                    log.error("Tâche {} introuvable dans le thread d'exécution", taskId);
+                    logger.error("Tâche ID {} introuvable dans le thread d'exécution", taskId);
                     return;
                 }
 
                 fileSyncService.executeSync(taskInThread);
 
                 // Mise à jour des timestamps
-                taskInThread.setLastSyncTime(LocalDateTime.now());
-                taskInThread.setNextSyncTime(LocalDateTime.now().plusMinutes(intervalMinutes));
+                LocalDateTime now = LocalDateTime.now();
+                taskInThread.setLastSyncTime(now);
+                LocalDateTime nextSync = now.plusMinutes(intervalMinutes);
+                taskInThread.setNextSyncTime(nextSync);
                 syncTaskRepository.save(taskInThread);
 
-                log.info("Synchronisation terminée pour: {}", taskName);
+                logger.info("Synchronisation terminée avec succès pour: {} - Prochaine exécution: {}",
+                    taskName, nextSync);
             } catch (Exception e) {
-                log.error("Erreur lors de l'exécution de la tâche: {}", taskName, e);
+                logger.error("Erreur lors de l'exécution asynchrone de la tâche: {}", taskName, e);
             }
         }).start();
     }

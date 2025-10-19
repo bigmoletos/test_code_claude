@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
 import { SyncLog } from '../../models/sync-task.model';
 import { SyncLogService, PageResponse } from '../../services/sync-log.service';
+import { LoggerService } from '../../services/logger.service';
 
 @Component({
   selector: 'app-log-list',
@@ -21,72 +22,80 @@ export class LogListComponent implements OnInit, OnDestroy {
 
   constructor(
     private logService: SyncLogService,
-    private route: ActivatedRoute
+    private route: ActivatedRoute,
+    private logger: LoggerService
   ) {
-    console.log('LogListComponent - Constructeur appelé');
+    this.logger.info('LogListComponent créé');
   }
 
   ngOnInit(): void {
-    console.log('LogListComponent - ngOnInit appelé');
+    this.logger.info('Initialisation LogListComponent');
     this.route.paramMap.subscribe(params => {
       const taskIdParam = params.get('taskId');
       this.taskId = taskIdParam ? Number(taskIdParam) : undefined;
-      console.log('LogListComponent - taskId extrait des params:', this.taskId);
+
+      if (this.taskId) {
+        this.logger.info('Mode filtré par tâche - ID: {}', this.taskId);
+      } else {
+        this.logger.info('Mode affichage tous les logs');
+      }
+
       this.loadLogs();
 
       // Rafraîchir automatiquement toutes les 5 secondes
+      this.logger.debug('Configuration du rafraîchissement automatique (5s)');
       this.refreshInterval = window.setInterval(() => {
+        this.logger.trace('Rafraîchissement automatique des logs');
         this.loadLogs();
       }, 5000);
     });
   }
 
   ngOnDestroy(): void {
+    this.logger.debug('Destruction LogListComponent - Nettoyage interval');
     if (this.refreshInterval) {
       clearInterval(this.refreshInterval);
     }
   }
 
   loadLogs(): void {
-    console.log('loadLogs appelé, taskId:', this.taskId, 'page:', this.currentPage);
+    this.logger.debug('Chargement des logs - Page: {}, TaskID: {}', this.currentPage, this.taskId || 'tous');
+
     if (this.taskId) {
       this.logService.getLogsByTask(this.taskId, this.currentPage, this.pageSize)
         .subscribe({
           next: (response) => {
-            console.log('Réponse logs reçue (par tâche):', response);
+            this.logger.info('Logs reçus pour la tâche ID: {} - {} logs', this.taskId, response.content.length);
             this.handleResponse(response);
           },
           error: (err) => {
-            console.error('Erreur chargement logs (par tâche):', err);
-            console.error('Détails erreur:', err.message, err.status, err.error);
+            this.logger.error('Erreur lors du chargement des logs pour la tâche ID: {}', err, this.taskId);
           }
         });
     } else {
       this.logService.getAllLogs(this.currentPage, this.pageSize)
         .subscribe({
           next: (response) => {
-            console.log('Réponse logs reçue (tous):', response);
+            this.logger.info('Tous les logs reçus - {} logs', response.content.length);
             this.handleResponse(response);
           },
           error: (err) => {
-            console.error('Erreur chargement logs (tous):', err);
-            console.error('Détails erreur:', err.message, err.status, err.error);
+            this.logger.error('Erreur lors du chargement de tous les logs', err);
           }
         });
     }
   }
 
   handleResponse(response: PageResponse<SyncLog>): void {
-    console.log('handleResponse appelé avec:', response);
-    console.log('Nombre de logs dans content:', response.content?.length);
+    this.logger.debug('Traitement de la réponse - Logs: {}, Total pages: {}', response.content?.length, response.totalPages);
     this.logs = response.content;
     this.totalPages = response.totalPages;
     this.currentPage = response.number;
-    console.log('Logs assignés, array length:', this.logs?.length);
   }
 
   nextPage(): void {
     if (this.currentPage < this.totalPages - 1) {
+      this.logger.debug('Navigation vers la page suivante: {}', this.currentPage + 1);
       this.currentPage++;
       this.loadLogs();
     }
@@ -94,6 +103,7 @@ export class LogListComponent implements OnInit, OnDestroy {
 
   previousPage(): void {
     if (this.currentPage > 0) {
+      this.logger.debug('Navigation vers la page précédente: {}', this.currentPage - 1);
       this.currentPage--;
       this.loadLogs();
     }

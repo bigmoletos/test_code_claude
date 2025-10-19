@@ -1,5 +1,6 @@
-import { Component } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
 import { RouterModule } from '@angular/router';
+import { LoggerService } from './services/logger.service';
 
 @Component({
   selector: 'app-root',
@@ -69,6 +70,14 @@ import { RouterModule } from '@angular/router';
     }
   `]
 })
-export class AppComponent {
+export class AppComponent implements OnInit {
   title = 'Folder Sync';
+
+  constructor(private logger: LoggerService) {}
+
+  ngOnInit(): void {
+    this.logger.info('=== Application Folder Sync démarrée ===');
+    this.logger.info('Version Angular: standalone components');
+    this.logger.debug('Titre: {}', this.title);
+  }
 }
