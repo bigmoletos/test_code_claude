@@ -342,7 +342,7 @@ public class CustomLogger {
     public void fatal(String message, Throwable throwable) {
         log(LogLevel.FATAL, message, throwable);
     }
-    
+
     /**
      * Formate un message avec des placeholders {} style SLF4J
      */
@@ -350,7 +350,7 @@ public class CustomLogger {
         if (args == null || args.length == 0) {
             return message;
         }
-        
+
         String result = message;
         for (Object arg : args) {
             result = result.replaceFirst("\\{\\}", String.valueOf(arg));

@@ -8,7 +8,7 @@ import java.lang.annotation.Target;
 
 /**
  * Annotation pour activer le logging automatique sur une classe.
- * 
+ *
  * Exemple d'utilisation:
  * <pre>
  * @Logged(level = LogLevel.DEBUG, logFile = "./logs/my-service.log")
@@ -20,32 +20,32 @@ import java.lang.annotation.Target;
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 public @interface Logged {
-    
+
     /**
      * Niveau de log par défaut
      */
     LogLevel level() default LogLevel.INFO;
-    
+
     /**
      * Chemin du fichier de log
      */
     String logFile() default "./logs/application.log";
-    
+
     /**
      * Taille maximale du fichier en octets (0 = pas de limite)
      */
     long maxFileSize() default 10485760; // 10MB
-    
+
     /**
      * Nombre maximal de fichiers de backup
      */
     int maxBackupFiles() default 5;
-    
+
     /**
      * Activer la compression GZIP
      */
     boolean compression() default true;
-    
+
     /**
      * Activer la sortie console
      */
