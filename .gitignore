@@ -21,6 +21,8 @@ frontend/dist/
 frontend/.angular/
 frontend/*.log
 
+
+
 # IDE
 .idea/
 .vscode/
@@ -29,6 +31,13 @@ frontend/*.log
 *.ipr
 .DS_Store
 
+# Claude AI
+.claude/
+**/.claude/
+
 # Logs
 logs/
 *.log
+
+
+preparation_entretien/

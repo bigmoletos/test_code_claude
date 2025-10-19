@@ -59,11 +59,18 @@ public class SyncTaskController {
 
     @PostMapping("/{id}/trigger")
     public ResponseEntity<Map<String, String>> triggerSync(@PathVariable Long id) {
-        syncTaskService.triggerSync(id);
-        Map<String, String> response = new HashMap<>();
-        response.put("message", "Synchronisation démarrée");
-        response.put("taskId", id.toString());
-        return ResponseEntity.ok(response);
+        try {
+            syncTaskService.triggerSync(id);
+            Map<String, String> response = new HashMap<>();
+            response.put("message", "Synchronisation démarrée");
+            response.put("taskId", id.toString());
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, String> error = new HashMap<>();
+            error.put("error", e.getMessage());
+            error.put("taskId", id.toString());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
     }
 
     @GetMapping("/{id}/status")

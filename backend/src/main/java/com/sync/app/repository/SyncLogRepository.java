@@ -17,4 +17,6 @@ public interface SyncLogRepository extends JpaRepository<SyncLog, Long> {
     List<SyncLog> findTop10BySyncTaskOrderByStartTimeDesc(SyncTask syncTask);
 
     Page<SyncLog> findAllByOrderByStartTimeDesc(Pageable pageable);
+
+    void deleteBySyncTask(SyncTask syncTask);
 }

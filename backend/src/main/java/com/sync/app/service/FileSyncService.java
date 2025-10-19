@@ -19,6 +19,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Service principal pour gérer la synchronisation de fichiers.
@@ -38,9 +39,29 @@ public class FileSyncService {
     private final Set<Long> runningSyncs = ConcurrentHashMap.newKeySet();
 
     /**
+     * Convertit un chemin Windows en chemin WSL si nécessaire.
+     * Exemple: D:\programmation -> /mnt/d/programmation
+     */
+    private String convertWindowsPathToWsl(String path) {
+        if (path == null || path.isEmpty()) {
+            return path;
+        }
+
+        // Détecte un chemin Windows (ex: C:\, D:\, etc.)
+        if (path.matches("^[A-Za-z]:\\\\.*")) {
+            char driveLetter = Character.toLowerCase(path.charAt(0));
+            String pathWithoutDrive = path.substring(2); // Enlève "C:"
+            String wslPath = "/mnt/" + driveLetter + pathWithoutDrive.replace("\\", "/");
+            log.info("Conversion chemin Windows -> WSL: {} -> {}", path, wslPath);
+            return wslPath;
+        }
+
+        return path;
+    }
+
+    /**
      * Exécute une synchronisation pour une tâche donnée.
      */
-    @Transactional
     public SyncLog executeSync(SyncTask syncTask) {
         if (!runningSyncs.add(syncTask.getId())) {
             log.warn("Sync already running for task: {}", syncTask.getId());
@@ -51,11 +72,15 @@ public class FileSyncService {
         syncLog.setSyncTask(syncTask);
         syncLog.setStartTime(LocalDateTime.now());
         syncLog.setStatus(SyncLog.SyncStatus.RUNNING);
-        syncLog = syncLogRepository.save(syncLog);
+        final SyncLog finalSyncLog = syncLogRepository.save(syncLog);
 
         try {
-            Path sourcePath = Paths.get(syncTask.getSourcePath());
-            Path destPath = Paths.get(syncTask.getDestinationPath());
+            // Conversion des chemins Windows vers WSL si nécessaire
+            String sourcePathStr = convertWindowsPathToWsl(syncTask.getSourcePath());
+            String destPathStr = convertWindowsPathToWsl(syncTask.getDestinationPath());
+
+            Path sourcePath = Paths.get(sourcePathStr);
+            Path destPath = Paths.get(destPathStr);
 
             // Validation des chemins
             if (!Files.exists(sourcePath)) {
@@ -74,6 +99,8 @@ public class FileSyncService {
 
             Set<String> processedFiles = new HashSet<>();
             SyncStats stats = new SyncStats();
+            AtomicLong lastLogTime = new AtomicLong(System.currentTimeMillis());
+            AtomicLong lastDbUpdateTime = new AtomicLong(System.currentTimeMillis());
 
             // Parcours des fichiers source
             Files.walkFileTree(sourcePath, new SimpleFileVisitor<Path>() {
@@ -109,6 +136,24 @@ public class FileSyncService {
                         stats.filesSkipped++;
                     }
 
+                    // Afficher la progression tous les 100 fichiers
+                    if (stats.filesScanned % 100 == 0) {
+                        long currentTime = System.currentTimeMillis();
+
+                        // Log console tous les 100 fichiers
+                        if (currentTime - lastLogTime.get() > 5000) { // au moins toutes les 5 secondes
+                            log.info("Progression: {} fichiers scannés, {} copiés, {} mis à jour, {} ignorés",
+                                stats.filesScanned, stats.filesCopied, stats.filesUpdated, stats.filesSkipped);
+                            lastLogTime.set(currentTime);
+                        }
+
+                        // Mise à jour en base toutes les 10 secondes
+                        if (currentTime - lastDbUpdateTime.get() > 10000) {
+                            updateSyncLogProgress(finalSyncLog, stats);
+                            lastDbUpdateTime.set(currentTime);
+                        }
+                    }
+
                     return FileVisitResult.CONTINUE;
                 }
 
@@ -142,25 +187,29 @@ public class FileSyncService {
                 }
             }
 
-            // Finalisation du log
-            syncLog.setEndTime(LocalDateTime.now());
-            syncLog.setStatus(SyncLog.SyncStatus.COMPLETED);
-            syncLog.setFilesScanned(stats.filesScanned);
-            syncLog.setFilesCopied(stats.filesCopied);
-            syncLog.setFilesUpdated(stats.filesUpdated);
-            syncLog.setFilesDeleted(stats.filesDeleted);
-            syncLog.setFilesSkipped(stats.filesSkipped);
-            syncLog.setTotalBytes(stats.totalBytes);
-            syncLog.setDetails(String.format("Synchronisation réussie: %d fichiers traités", stats.filesScanned));
+            // Log final de la progression
+            log.info("Synchronisation terminée: {} fichiers scannés, {} copiés, {} mis à jour, {} supprimés, {} ignorés",
+                stats.filesScanned, stats.filesCopied, stats.filesUpdated, stats.filesDeleted, stats.filesSkipped);
 
-            return syncLogRepository.save(syncLog);
+            // Finalisation du log
+            finalSyncLog.setEndTime(LocalDateTime.now());
+            finalSyncLog.setStatus(SyncLog.SyncStatus.COMPLETED);
+            finalSyncLog.setFilesScanned(stats.filesScanned);
+            finalSyncLog.setFilesCopied(stats.filesCopied);
+            finalSyncLog.setFilesUpdated(stats.filesUpdated);
+            finalSyncLog.setFilesDeleted(stats.filesDeleted);
+            finalSyncLog.setFilesSkipped(stats.filesSkipped);
+            finalSyncLog.setTotalBytes(stats.totalBytes);
+            finalSyncLog.setDetails(String.format("Synchronisation réussie: %d fichiers traités", stats.filesScanned));
+
+            return syncLogRepository.save(finalSyncLog);
 
         } catch (Exception e) {
             log.error("Erreur lors de la synchronisation", e);
-            syncLog.setEndTime(LocalDateTime.now());
-            syncLog.setStatus(SyncLog.SyncStatus.FAILED);
-            syncLog.setErrorMessage(e.getMessage());
-            return syncLogRepository.save(syncLog);
+            finalSyncLog.setEndTime(LocalDateTime.now());
+            finalSyncLog.setStatus(SyncLog.SyncStatus.FAILED);
+            finalSyncLog.setErrorMessage(e.getMessage());
+            return syncLogRepository.save(finalSyncLog);
         } finally {
             runningSyncs.remove(syncTask.getId());
         }
@@ -252,6 +301,24 @@ public class FileSyncService {
         }
 
         fileMetadataRepository.save(metadata);
+    }
+
+    /**
+     * Met à jour le SyncLog avec les statistiques en cours de synchronisation.
+     */
+    private void updateSyncLogProgress(SyncLog syncLog, SyncStats stats) {
+        try {
+            syncLog.setFilesScanned(stats.filesScanned);
+            syncLog.setFilesCopied(stats.filesCopied);
+            syncLog.setFilesUpdated(stats.filesUpdated);
+            syncLog.setFilesDeleted(stats.filesDeleted);
+            syncLog.setFilesSkipped(stats.filesSkipped);
+            syncLog.setTotalBytes(stats.totalBytes);
+            syncLog.setDetails(String.format("En cours: %d fichiers scannés...", stats.filesScanned));
+            syncLogRepository.save(syncLog);
+        } catch (Exception e) {
+            log.warn("Erreur lors de la mise à jour de la progression: {}", e.getMessage());
+        }
     }
 
     /**

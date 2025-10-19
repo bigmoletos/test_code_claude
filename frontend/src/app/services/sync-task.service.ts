@@ -7,7 +7,7 @@ import { SyncTask } from '../models/sync-task.model';
   providedIn: 'root'
 })
 export class SyncTaskService {
-  private apiUrl = 'http://localhost:8080/api/sync-tasks';
+  private apiUrl = 'http://localhost:8081/api/sync-tasks';
 
   constructor(private http: HttpClient) {}
 

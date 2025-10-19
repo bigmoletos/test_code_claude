@@ -3,6 +3,7 @@ package com.sync.app.service;
 import com.sync.app.dto.SyncTaskDto;
 import com.sync.app.entity.SyncTask;
 import com.sync.app.repository.FileMetadataRepository;
+import com.sync.app.repository.SyncLogRepository;
 import com.sync.app.repository.SyncTaskRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -20,6 +21,7 @@ public class SyncTaskService {
 
     private final SyncTaskRepository syncTaskRepository;
     private final FileMetadataRepository fileMetadataRepository;
+    private final SyncLogRepository syncLogRepository;
     private final FileSyncService fileSyncService;
 
     public List<SyncTask> getAllTasks() {
@@ -67,6 +69,8 @@ public class SyncTaskService {
     @Transactional
     public void deleteTask(Long id) {
         SyncTask task = getTaskById(id);
+        // Supprimer d'abord les logs, puis les métadonnées, puis la tâche
+        syncLogRepository.deleteBySyncTask(task);
         fileMetadataRepository.deleteBySyncTask(task);
         syncTaskRepository.delete(task);
     }
@@ -89,11 +93,16 @@ public class SyncTaskService {
         }
 
         // Exécution en arrière-plan
+        final Long taskId = id;
         new Thread(() -> {
-            fileSyncService.executeSync(task);
-            task.setLastSyncTime(LocalDateTime.now());
-            task.setNextSyncTime(LocalDateTime.now().plusMinutes(task.getIntervalMinutes()));
-            syncTaskRepository.save(task);
+            // Récupérer à nouveau la tâche dans le contexte du nouveau thread
+            SyncTask taskInThread = syncTaskRepository.findById(taskId).orElse(null);
+            if (taskInThread != null) {
+                fileSyncService.executeSync(taskInThread);
+                taskInThread.setLastSyncTime(LocalDateTime.now());
+                taskInThread.setNextSyncTime(LocalDateTime.now().plusMinutes(taskInThread.getIntervalMinutes()));
+                syncTaskRepository.save(taskInThread);
+            }
         }).start();
     }
 

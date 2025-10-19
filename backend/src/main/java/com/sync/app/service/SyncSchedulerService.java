@@ -47,18 +47,29 @@ public class SyncSchedulerService {
      * Exécute une tâche de manière asynchrone et met à jour les timestamps.
      */
     private void executeTaskAsync(SyncTask task) {
+        final Long taskId = task.getId();
+        final String taskName = task.getName();
+        final Long intervalMinutes = task.getIntervalMinutes();
+
         new Thread(() -> {
             try {
-                fileSyncService.executeSync(task);
+                // Récupérer à nouveau la tâche dans le contexte du nouveau thread
+                SyncTask taskInThread = syncTaskRepository.findById(taskId).orElse(null);
+                if (taskInThread == null) {
+                    log.error("Tâche {} introuvable dans le thread d'exécution", taskId);
+                    return;
+                }
+
+                fileSyncService.executeSync(taskInThread);
 
                 // Mise à jour des timestamps
-                task.setLastSyncTime(LocalDateTime.now());
-                task.setNextSyncTime(LocalDateTime.now().plusMinutes(task.getIntervalMinutes()));
-                syncTaskRepository.save(task);
+                taskInThread.setLastSyncTime(LocalDateTime.now());
+                taskInThread.setNextSyncTime(LocalDateTime.now().plusMinutes(intervalMinutes));
+                syncTaskRepository.save(taskInThread);
 
-                log.info("Synchronisation terminée pour: {}", task.getName());
+                log.info("Synchronisation terminée pour: {}", taskName);
             } catch (Exception e) {
-                log.error("Erreur lors de l'exécution de la tâche: {}", task.getName(), e);
+                log.error("Erreur lors de l'exécution de la tâche: {}", taskName, e);
             }
         }).start();
     }

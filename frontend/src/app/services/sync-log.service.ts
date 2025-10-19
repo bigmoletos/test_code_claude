@@ -15,7 +15,7 @@ export interface PageResponse<T> {
   providedIn: 'root'
 })
 export class SyncLogService {
-  private apiUrl = 'http://localhost:8080/api/sync-logs';
+  private apiUrl = 'http://localhost:8081/api/sync-logs';
 
   constructor(private http: HttpClient) {}
 
@@ -24,6 +24,8 @@ export class SyncLogService {
       .set('page', page.toString())
       .set('size', size.toString());
 
+    const url = `${this.apiUrl}?page=${page}&size=${size}`;
+    console.log('Appel HTTP getAllLogs vers:', url);
     return this.http.get<PageResponse<SyncLog>>(this.apiUrl, { params });
   }
 
@@ -32,6 +34,8 @@ export class SyncLogService {
       .set('page', page.toString())
       .set('size', size.toString());
 
+    const url = `${this.apiUrl}/task/${taskId}?page=${page}&size=${size}`;
+    console.log('Appel HTTP getLogsByTask vers:', url);
     return this.http.get<PageResponse<SyncLog>>(`${this.apiUrl}/task/${taskId}`, { params });
   }
 
