@@ -30,6 +30,17 @@ import java.util.concurrent.atomic.AtomicLong;
 public class FileSyncService {
     private static final CustomLogger logger = CustomLogger.getLogger("FileSyncService");
 
+    // Patterns de fichiers/dossiers à ignorer
+    private static final Set<String> EXCLUDED_PATTERNS = Set.of(
+        ".git", ".svn", ".hg", // Version control
+        "node_modules", ".next", "dist", "build", "target", // Build directories
+        ".idea", ".vscode", ".eclipse", // IDE files
+        ".DS_Store", "Thumbs.db", "desktop.ini", // System files
+        "__pycache__", ".pyc", ".pyo", // Python cache
+        ".class", ".jar", ".war", // Java binaries
+        "*.tmp", "*.temp", "*.log" // Temporary files
+    );
+
     static {
         logger.setLevel(LogLevel.DEBUG)
               .setConsoleOutput(true)
@@ -45,8 +56,76 @@ public class FileSyncService {
     @Value("${sync.chunk-size:8192}")
     private int chunkSize;
 
+    @Value("${sync.max-path-length:250}") // Limite de longueur du chemin (Windows: 260, Linux: 255)
+    private int maxPathLength;
+
+    @Value("${sync.max-filename-length:200}") // Limite de longueur du nom de fichier
+    private int maxFileNameLength;
+
     // Suivi des synchronisations en cours
     private final Set<Long> runningSyncs = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Vérifie si un fichier/dossier doit être exclu de la synchronisation
+     */
+    private boolean shouldExclude(Path path) {
+        String fileName = path.getFileName().toString();
+
+        // Vérifier la longueur du nom de fichier
+        if (fileName.length() > maxFileNameLength) {
+            logger.warn("Nom de fichier trop long ({} caractères) - ignoré: {}",
+                fileName.length(), truncateString(fileName, 100));
+            return true;
+        }
+
+        // Vérifier la longueur du chemin complet
+        String fullPath = path.toString();
+        if (fullPath.length() > maxPathLength) {
+            logger.warn("Chemin trop long ({} caractères) - ignoré: {}",
+                fullPath.length(), truncateString(fullPath, 100));
+            return true;
+        }
+
+        // Vérifier les patterns exacts
+        if (EXCLUDED_PATTERNS.contains(fileName)) {
+            logger.debug("Exclusion (pattern exact): {}", fileName);
+            return true;
+        }
+
+        // Vérifier les patterns avec wildcards
+        for (String pattern : EXCLUDED_PATTERNS) {
+            if (pattern.contains("*")) {
+                String regex = pattern.replace(".", "\\.").replace("*", ".*");
+                if (fileName.matches(regex)) {
+                    logger.debug("Exclusion (pattern wildcard): {}", fileName);
+                    return true;
+                }
+            }
+        }
+
+        // Vérifier si un dossier parent est exclu
+        Path current = path.getParent();
+        while (current != null) {
+            String dirName = current.getFileName() != null ? current.getFileName().toString() : "";
+            if (EXCLUDED_PATTERNS.contains(dirName)) {
+                logger.debug("Exclusion (parent exclu): {} dans {}", fileName, dirName);
+                return true;
+            }
+            current = current.getParent();
+        }
+
+        return false;
+    }
+
+    /**
+     * Tronque une chaîne pour l'affichage dans les logs
+     */
+    private String truncateString(String str, int maxLength) {
+        if (str == null || str.length() <= maxLength) {
+            return str;
+        }
+        return str.substring(0, maxLength) + "... (" + str.length() + " caractères)";
+    }
 
     /**
      * Convertit un chemin Windows en chemin WSL si nécessaire.
@@ -129,35 +208,47 @@ public class FileSyncService {
             // Parcours des fichiers source
             Files.walkFileTree(sourcePath, new SimpleFileVisitor<Path>() {
                 @Override
-                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                    String relativePath = sourcePath.relativize(file).toString();
-                    processedFiles.add(relativePath);
-
-                    Path destFile = destPath.resolve(relativePath);
-                    stats.filesScanned++;
-
-                    FileMetadata existing = existingMetadata.get(relativePath);
-                    boolean needsCopy = shouldCopyFile(file, destFile, existing, syncTask.getUseChecksum());
-
-                    if (needsCopy) {
-                        // Créer répertoire parent si nécessaire
-                        Files.createDirectories(destFile.getParent());
-
-                        // Copier le fichier
-                        Files.copy(file, destFile, StandardCopyOption.REPLACE_EXISTING,
-                                   StandardCopyOption.COPY_ATTRIBUTES);
-
-                        if (existing == null) {
-                            stats.filesCopied++;
-                        } else {
-                            stats.filesUpdated++;
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                    try {
+                        // Vérifier si le fichier doit être exclu (patterns, longueur chemin/nom)
+                        if (shouldExclude(file)) {
+                            stats.filesExcluded++;
+                            return FileVisitResult.CONTINUE;
                         }
-                        stats.totalBytes += attrs.size();
 
-                        // Mettre à jour les métadonnées
-                        updateFileMetadata(syncTask, relativePath, file, attrs);
-                    } else {
-                        stats.filesSkipped++;
+                        String relativePath = sourcePath.relativize(file).toString();
+                        processedFiles.add(relativePath);
+
+                        Path destFile = destPath.resolve(relativePath);
+                        stats.filesScanned++;
+
+                        FileMetadata existing = existingMetadata.get(relativePath);
+                        boolean needsCopy = shouldCopyFile(file, destFile, existing, syncTask.getUseChecksum());
+
+                        if (needsCopy) {
+                            // Créer répertoire parent si nécessaire
+                            Files.createDirectories(destFile.getParent());
+
+                            // Copier le fichier
+                            Files.copy(file, destFile, StandardCopyOption.REPLACE_EXISTING,
+                                       StandardCopyOption.COPY_ATTRIBUTES);
+
+                            if (existing == null) {
+                                stats.filesCopied++;
+                            } else {
+                                stats.filesUpdated++;
+                            }
+                            stats.totalBytes += attrs.size();
+
+                            // Mettre à jour les métadonnées
+                            updateFileMetadata(syncTask, relativePath, file, attrs);
+                        } else {
+                            stats.filesSkipped++;
+                        }
+                    } catch (Exception e) {
+                        stats.filesWithErrors++;
+                        logger.warn("Erreur lors du traitement du fichier: {} - {}", file, e.getMessage());
+                        // Continuer malgré l'erreur
                     }
 
                     // Afficher la progression tous les 100 fichiers
@@ -166,8 +257,9 @@ public class FileSyncService {
 
                         // Log console tous les 100 fichiers
                         if (currentTime - lastLogTime.get() > 5000) { // au moins toutes les 5 secondes
-                            logger.info("Progression: {} fichiers scannés, {} copiés, {} mis à jour, {} ignorés",
-                                stats.filesScanned, stats.filesCopied, stats.filesUpdated, stats.filesSkipped);
+                            logger.info("Progression: {} fichiers scannés, {} copiés, {} mis à jour, {} ignorés, {} exclus, {} erreurs",
+                                stats.filesScanned, stats.filesCopied, stats.filesUpdated, stats.filesSkipped,
+                                stats.filesExcluded, stats.filesWithErrors);
                             lastLogTime.set(currentTime);
                         }
 
@@ -185,6 +277,12 @@ public class FileSyncService {
                 public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
                     if (dir.equals(sourcePath)) {
                         return FileVisitResult.CONTINUE;
+                    }
+
+                    // Vérifier si le dossier doit être exclu
+                    if (shouldExclude(dir)) {
+                        logger.debug("Dossier exclu: {}", dir.getFileName());
+                        return FileVisitResult.SKIP_SUBTREE;
                     }
 
                     String relativePath = sourcePath.relativize(dir).toString();
@@ -225,6 +323,8 @@ public class FileSyncService {
             logger.info("Fichiers mis à jour: {}", stats.filesUpdated);
             logger.info("Fichiers supprimés: {}", stats.filesDeleted);
             logger.info("Fichiers ignorés (inchangés): {}", stats.filesSkipped);
+            logger.info("Fichiers exclus: {}", stats.filesExcluded);
+            logger.info("Fichiers en erreur: {}", stats.filesWithErrors);
             logger.info("Volume total: {} octets ({} MB)", stats.totalBytes, stats.totalBytes / (1024 * 1024));
 
             // Finalisation du log
@@ -236,7 +336,12 @@ public class FileSyncService {
             finalSyncLog.setFilesDeleted(stats.filesDeleted);
             finalSyncLog.setFilesSkipped(stats.filesSkipped);
             finalSyncLog.setTotalBytes(stats.totalBytes);
-            finalSyncLog.setDetails(String.format("Synchronisation réussie: %d fichiers traités", stats.filesScanned));
+
+            String details = String.format("Synchronisation réussie: %d fichiers traités", stats.filesScanned);
+            if (stats.filesWithErrors > 0) {
+                details += String.format(" (%d erreurs ignorées)", stats.filesWithErrors);
+            }
+            finalSyncLog.setDetails(details);
 
             return syncLogRepository.save(finalSyncLog);
 
@@ -388,6 +493,8 @@ public class FileSyncService {
         long filesUpdated = 0;
         long filesDeleted = 0;
         long filesSkipped = 0;
+        long filesExcluded = 0;
+        long filesWithErrors = 0;
         long totalBytes = 0;
     }
 }

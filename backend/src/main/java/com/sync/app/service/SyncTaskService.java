@@ -1,5 +1,6 @@
 package com.sync.app.service;
 
+import com.sync.app.annotation.Logged;
 import com.sync.app.dto.SyncTaskDto;
 import com.sync.app.entity.SyncTask;
 import com.sync.app.repository.FileMetadataRepository;
@@ -16,20 +17,20 @@ import java.util.List;
 
 /**
  * Service pour gérer les opérations CRUD sur les tâches de synchronisation.
+ * Utilise @Logged pour une configuration automatique du logger.
  */
 @Service
 @RequiredArgsConstructor
+@Logged(
+    level = LogLevel.INFO,
+    logFile = "./logs/sync-task-service.log",
+    maxFileSize = 10 * 1024 * 1024,
+    maxBackupFiles = 5,
+    compression = true
+)
 public class SyncTaskService {
+    // Le logger est automatiquement configuré via @Logged
     private static final CustomLogger logger = CustomLogger.getLogger("SyncTaskService");
-
-    static {
-        logger.setLevel(LogLevel.INFO)
-              .setConsoleOutput(true)
-              .setLogFile("./logs/sync-task-service.log")
-              .setMaxFileSize(10 * 1024 * 1024) // 10MB
-              .setMaxBackupFiles(5)
-              .setCompressionEnabled(true);
-    }
 
     private final SyncTaskRepository syncTaskRepository;
     private final FileMetadataRepository fileMetadataRepository;

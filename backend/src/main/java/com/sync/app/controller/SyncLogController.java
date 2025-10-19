@@ -1,5 +1,6 @@
 package com.sync.app.controller;
 
+import com.sync.app.annotation.Logged;
 import com.sync.app.dto.SyncLogDto;
 import com.sync.app.entity.SyncLog;
 import com.sync.app.entity.SyncTask;
@@ -16,22 +17,21 @@ import org.springframework.web.bind.annotation.*;
 
 /**
  * Contrôleur REST pour gérer les logs de synchronisation.
+ * Utilise @Logged pour une configuration automatique du logger.
  */
 @RestController
 @RequestMapping("/api/sync-logs")
 @CrossOrigin(origins = "http://localhost:4200")
 @RequiredArgsConstructor
+@Logged(
+    level = LogLevel.INFO,
+    logFile = "./logs/sync-log-controller.log",
+    maxFileSize = 10 * 1024 * 1024,
+    maxBackupFiles = 5,
+    compression = true
+)
 public class SyncLogController {
     private static final CustomLogger logger = CustomLogger.getLogger("SyncLogController");
-
-    static {
-        logger.setLevel(LogLevel.INFO)
-              .setConsoleOutput(true)
-              .setLogFile("./logs/sync-log-controller.log")
-              .setMaxFileSize(10 * 1024 * 1024) // 10MB
-              .setMaxBackupFiles(5)
-              .setCompressionEnabled(true);
-    }
 
     private final SyncLogRepository syncLogRepository;
     private final SyncTaskRepository syncTaskRepository;

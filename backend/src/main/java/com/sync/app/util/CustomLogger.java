@@ -307,40 +307,55 @@ public class CustomLogger {
 
     // ==================== MÉTHODES DE LOGGING ====================
 
-    public void trace(String message) {
-        log(LogLevel.TRACE, message, null);
+    public void trace(String message, Object... args) {
+        log(LogLevel.TRACE, formatWithArgs(message, args), null);
     }
 
-    public void debug(String message) {
-        log(LogLevel.DEBUG, message, null);
+    public void debug(String message, Object... args) {
+        log(LogLevel.DEBUG, formatWithArgs(message, args), null);
     }
 
-    public void info(String message) {
-        log(LogLevel.INFO, message, null);
+    public void info(String message, Object... args) {
+        log(LogLevel.INFO, formatWithArgs(message, args), null);
     }
 
-    public void warn(String message) {
-        log(LogLevel.WARN, message, null);
+    public void warn(String message, Object... args) {
+        log(LogLevel.WARN, formatWithArgs(message, args), null);
     }
 
     public void warn(String message, Throwable throwable) {
         log(LogLevel.WARN, message, throwable);
     }
 
-    public void error(String message) {
-        log(LogLevel.ERROR, message, null);
+    public void error(String message, Object... args) {
+        log(LogLevel.ERROR, formatWithArgs(message, args), null);
     }
 
     public void error(String message, Throwable throwable) {
         log(LogLevel.ERROR, message, throwable);
     }
 
-    public void fatal(String message) {
-        log(LogLevel.FATAL, message, null);
+    public void fatal(String message, Object... args) {
+        log(LogLevel.FATAL, formatWithArgs(message, args), null);
     }
 
     public void fatal(String message, Throwable throwable) {
         log(LogLevel.FATAL, message, throwable);
+    }
+    
+    /**
+     * Formate un message avec des placeholders {} style SLF4J
+     */
+    private String formatWithArgs(String message, Object... args) {
+        if (args == null || args.length == 0) {
+            return message;
+        }
+        
+        String result = message;
+        for (Object arg : args) {
+            result = result.replaceFirst("\\{\\}", String.valueOf(arg));
+        }
+        return result;
     }
 
     public boolean isLevelEnabled(LogLevel level) {

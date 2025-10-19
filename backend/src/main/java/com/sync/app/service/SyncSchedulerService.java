@@ -1,5 +1,6 @@
 package com.sync.app.service;
 
+import com.sync.app.annotation.Logged;
 import com.sync.app.entity.SyncTask;
 import com.sync.app.repository.SyncTaskRepository;
 import com.sync.app.util.CustomLogger;
@@ -14,20 +15,19 @@ import java.util.List;
 
 /**
  * Service pour gérer la planification automatique des synchronisations.
+ * Utilise @Logged pour une configuration automatique du logger.
  */
 @Service
 @RequiredArgsConstructor
+@Logged(
+    level = LogLevel.INFO,
+    logFile = "./logs/sync-scheduler.log",
+    maxFileSize = 10 * 1024 * 1024,
+    maxBackupFiles = 5,
+    compression = true
+)
 public class SyncSchedulerService {
     private static final CustomLogger logger = CustomLogger.getLogger("SyncSchedulerService");
-
-    static {
-        logger.setLevel(LogLevel.INFO)
-              .setConsoleOutput(true)
-              .setLogFile("./logs/sync-scheduler.log")
-              .setMaxFileSize(10 * 1024 * 1024) // 10MB
-              .setMaxBackupFiles(5)
-              .setCompressionEnabled(true);
-    }
 
     private final SyncTaskRepository syncTaskRepository;
     private final FileSyncService fileSyncService;

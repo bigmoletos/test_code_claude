@@ -1,5 +1,6 @@
 package com.sync.app.controller;
 
+import com.sync.app.annotation.Logged;
 import com.sync.app.dto.SyncTaskDto;
 import com.sync.app.entity.SyncTask;
 import com.sync.app.service.SyncTaskService;
@@ -17,22 +18,21 @@ import java.util.Map;
 
 /**
  * Contrôleur REST pour gérer les tâches de synchronisation.
+ * Utilise @Logged pour une configuration automatique du logger.
  */
 @RestController
 @RequestMapping("/api/sync-tasks")
 @CrossOrigin(origins = "http://localhost:4200")
 @RequiredArgsConstructor
+@Logged(
+    level = LogLevel.INFO,
+    logFile = "./logs/sync-task-controller.log",
+    maxFileSize = 10 * 1024 * 1024,
+    maxBackupFiles = 5,
+    compression = true
+)
 public class SyncTaskController {
     private static final CustomLogger logger = CustomLogger.getLogger("SyncTaskController");
-
-    static {
-        logger.setLevel(LogLevel.INFO)
-              .setConsoleOutput(true)
-              .setLogFile("./logs/sync-task-controller.log")
-              .setMaxFileSize(10 * 1024 * 1024) // 10MB
-              .setMaxBackupFiles(5)
-              .setCompressionEnabled(true);
-    }
 
     private final SyncTaskService syncTaskService;
 

@@ -39,6 +39,12 @@
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
+        <!-- AOP pour les aspects (logging automatique) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
+
         <!-- Base de données H2 (pour dev/test) -->
         <dependency>
             <groupId>com.h2database</groupId>

@@ -29,3 +29,9 @@ sync:
   default-interval: 7200000  # 2 heures en millisecondes
   max-concurrent-syncs: 3
   chunk-size: 8192  # Taille buffer pour copie de fichiers (8KB)
+
+  # Limites de longueur des chemins/noms de fichiers
+  # Windows: limite MAX_PATH de 260 caractères
+  # Linux: limite de 255 caractères pour le nom de fichier, 4096 pour le chemin
+  max-path-length: 250       # Longueur max du chemin complet (avec marge de sécurité)
+  max-filename-length: 200   # Longueur max du nom de fichier seul
