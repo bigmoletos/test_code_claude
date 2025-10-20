@@ -93,7 +93,7 @@ export class TaskListComponent implements OnInit {
           this.logger.error('Erreur lors du déclenchement de la synchronisation pour: {}', err, task.name);
         }
       });
-    } else if (this.syncStatuses.get(task.id)) {
+    } else if (task.id && this.syncStatuses.get(task.id)) {
       this.logger.warn('Synchronisation déjà en cours pour: {}', task.name);
     }
   }

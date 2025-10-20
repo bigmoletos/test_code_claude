@@ -31,7 +31,14 @@ sync:
   chunk-size: 8192  # Taille buffer pour copie de fichiers (8KB)
 
   # Limites de longueur des chemins/noms de fichiers
-  # Windows: limite MAX_PATH de 260 caractères
-  # Linux: limite de 255 caractères pour le nom de fichier, 4096 pour le chemin
-  max-path-length: 250       # Longueur max du chemin complet (avec marge de sécurité)
+  # Windows: limite MAX_PATH de 260 caractères (classique) ou 32767 (avec LongPathsEnabled)
+  # Linux/WSL: limite de 255 caractères pour le nom de fichier, 4096 pour le chemin
+  # Note: En WSL, les chemins /mnt/d/... sont plus longs que les chemins Windows D:\...
+  #       Projets Java avec packages profonds nécessitent des chemins plus longs
+  max-path-length: 400       # Longueur max du chemin complet (augmenté pour WSL et Java)
   max-filename-length: 200   # Longueur max du nom de fichier seul
+
+  # Exclusion des fichiers package-info.java
+  # Ces fichiers causent souvent des erreurs "Invalid argument" en WSL
+  # car ils contiennent des annotations avec caractères spéciaux
+  exclude-package-info: true  # true = exclure tous les package-info.java

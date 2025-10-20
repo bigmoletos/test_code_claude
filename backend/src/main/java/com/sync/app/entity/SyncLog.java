@@ -51,6 +51,12 @@ public class SyncLog {
     private Long filesSkipped = 0L;
 
     @Column
+    private Long filesExcluded = 0L;
+
+    @Column
+    private Long filesWithErrors = 0L;
+
+    @Column
     private Long totalBytes = 0L;
 
     @Column(length = 2000)

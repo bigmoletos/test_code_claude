@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicLong;
 @RequiredArgsConstructor
 public class FileSyncService {
     private static final CustomLogger logger = CustomLogger.getLogger("FileSyncService");
+    private static final CustomLogger exclusionLogger = CustomLogger.getLogger("FileSyncExclusions");
 
     // Patterns de fichiers/dossiers à ignorer
     private static final Set<String> EXCLUDED_PATTERNS = Set.of(
@@ -38,7 +39,8 @@ public class FileSyncService {
         ".DS_Store", "Thumbs.db", "desktop.ini", // System files
         "__pycache__", ".pyc", ".pyo", // Python cache
         ".class", ".jar", ".war", // Java binaries
-        "*.tmp", "*.temp", "*.log" // Temporary files
+        "*.tmp", "*.temp", "*.log", // Temporary files
+        "package-info.java" // Fichier Java problématique (annotations spéciales, erreurs WSL)
     );
 
     static {
@@ -48,6 +50,14 @@ public class FileSyncService {
               .setMaxFileSize(20 * 1024 * 1024) // 20MB
               .setMaxBackupFiles(10)
               .setCompressionEnabled(true);
+
+        // Logger spécifique pour les exclusions
+        exclusionLogger.setLevel(LogLevel.INFO)
+                      .setConsoleOutput(false)  // Pas de spam console
+                      .setLogFile("./logs/exclusions.log")
+                      .setMaxFileSize(50 * 1024 * 1024) // 50MB (plus de données)
+                      .setMaxBackupFiles(5)
+                      .setCompressionEnabled(true);
     }
 
     private final FileMetadataRepository fileMetadataRepository;
@@ -62,6 +72,9 @@ public class FileSyncService {
     @Value("${sync.max-filename-length:200}") // Limite de longueur du nom de fichier
     private int maxFileNameLength;
 
+    @Value("${sync.exclude-package-info:true}") // Exclure les package-info.java (problèmes WSL)
+    private boolean excludePackageInfo;
+
     // Suivi des synchronisations en cours
     private final Set<Long> runningSyncs = ConcurrentHashMap.newKeySet();
 
@@ -70,19 +83,67 @@ public class FileSyncService {
      */
     private boolean shouldExclude(Path path) {
         String fileName = path.getFileName().toString();
+        String fullPath = path.toString();
+
+        // Vérifier package-info.java en priorité (source fréquente de problèmes)
+        if (excludePackageInfo && "package-info.java".equals(fileName)) {
+            logger.warn("❌ EXCLUSION - package-info.java détecté (fichier problématique en WSL)");
+            logger.info("   Chemin: {}", truncateString(fullPath, 200));
+
+            exclusionLogger.warn("=== EXCLUSION: PACKAGE-INFO.JAVA ===");
+            exclusionLogger.info("Fichier: package-info.java");
+            exclusionLogger.info("Raison: Fichier Java spécial causant des erreurs 'Invalid argument' en WSL");
+            exclusionLogger.info("Chemin: {}", fullPath);
+            exclusionLogger.info("Config: sync.exclude-package-info={}", excludePackageInfo);
+            exclusionLogger.info("Solution: Mettre sync.exclude-package-info=false dans application.yml pour forcer la copie");
+            exclusionLogger.info("----------------------------------------");
+            return true;
+        }
 
         // Vérifier la longueur du nom de fichier
         if (fileName.length() > maxFileNameLength) {
-            logger.warn("Nom de fichier trop long ({} caractères) - ignoré: {}",
-                fileName.length(), truncateString(fileName, 100));
+            logger.warn("❌ EXCLUSION - Nom trop long ({} > {} caractères): {}",
+                fileName.length(), maxFileNameLength, truncateString(fileName, 150));
+            logger.info("   Chemin complet: {}", truncateString(fullPath, 200));
+
+            // Log détaillé dans fichier exclusions
+            exclusionLogger.warn("=== EXCLUSION: NOM TROP LONG ===");
+            exclusionLogger.info("Fichier: {}", fileName);
+            exclusionLogger.info("Longueur: {} caractères (max: {})", fileName.length(), maxFileNameLength);
+            exclusionLogger.info("Chemin: {}", fullPath);
+            exclusionLogger.info("----------------------------------------");
             return true;
         }
 
         // Vérifier la longueur du chemin complet
-        String fullPath = path.toString();
         if (fullPath.length() > maxPathLength) {
-            logger.warn("Chemin trop long ({} caractères) - ignoré: {}",
-                fullPath.length(), truncateString(fullPath, 100));
+            logger.warn("❌ EXCLUSION - Chemin trop long ({} > {} caractères)",
+                fullPath.length(), maxPathLength);
+            logger.info("   Chemin: {}", truncateString(fullPath, 200));
+            logger.info("   Fichier: {}", fileName);
+
+            // Log détaillé dans fichier exclusions
+            exclusionLogger.warn("=== EXCLUSION: CHEMIN TROP LONG ===");
+            exclusionLogger.info("Fichier: {}", fileName);
+            exclusionLogger.info("Longueur chemin: {} caractères (max: {})", fullPath.length(), maxPathLength);
+            exclusionLogger.info("Chemin: {}", fullPath);
+            exclusionLogger.info("----------------------------------------");
+            return true;
+        }
+
+        // Vérifier les caractères invalides/problématiques dans le nom
+        if (hasInvalidCharacters(fileName)) {
+            logger.warn("❌ EXCLUSION - Caractères invalides détectés");
+            logger.info("   Fichier: {}", fileName);
+            logger.info("   Chemin: {}", truncateString(fullPath, 200));
+            logger.info("   Caractères suspects: {}", findInvalidChars(fileName));
+
+            // Log détaillé dans fichier exclusions
+            exclusionLogger.warn("=== EXCLUSION: CARACTÈRES INVALIDES ===");
+            exclusionLogger.info("Fichier: {}", fileName);
+            exclusionLogger.info("Caractères invalides: {}", findInvalidChars(fileName));
+            exclusionLogger.info("Chemin: {}", fullPath);
+            exclusionLogger.info("----------------------------------------");
             return true;
         }
 
@@ -97,7 +158,7 @@ public class FileSyncService {
             if (pattern.contains("*")) {
                 String regex = pattern.replace(".", "\\.").replace("*", ".*");
                 if (fileName.matches(regex)) {
-                    logger.debug("Exclusion (pattern wildcard): {}", fileName);
+                    logger.debug("Exclusion (pattern wildcard {}): {}", pattern, fileName);
                     return true;
                 }
             }
@@ -115,6 +176,53 @@ public class FileSyncService {
         }
 
         return false;
+    }
+
+    /**
+     * Vérifie si un nom de fichier contient des caractères invalides
+     * Caractères problématiques : < > : " | ? * et caractères de contrôle (0-31)
+     */
+    private boolean hasInvalidCharacters(String fileName) {
+        // Caractères interdits sous Windows : < > : " / \ | ? *
+        // Sous Linux : principalement / et le caractère null
+        // On vérifie aussi les caractères de contrôle (ASCII 0-31)
+
+        for (char c : fileName.toCharArray()) {
+            // Caractères de contrôle (0-31)
+            if (c < 32) {
+                return true;
+            }
+            // Caractères invalides Windows (communs)
+            if (c == '<' || c == '>' || c == ':' || c == '"' ||
+                c == '|' || c == '?' || c == '*') {
+                return true;
+            }
+            // Caractère null
+            if (c == '\0') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Trouve et liste les caractères invalides dans un nom de fichier
+     */
+    private String findInvalidChars(String fileName) {
+        StringBuilder invalid = new StringBuilder();
+        for (int i = 0; i < fileName.length(); i++) {
+            char c = fileName.charAt(i);
+            if (c < 32) {
+                invalid.append(String.format("'\\u%04x' (contrôle) à position %d, ", (int)c, i));
+            } else if (c == '<' || c == '>' || c == ':' || c == '"' ||
+                       c == '|' || c == '?' || c == '*') {
+                invalid.append(String.format("'%c' à position %d, ", c, i));
+            } else if (c == '\0') {
+                invalid.append(String.format("'\\0' (null) à position %d, ", i));
+            }
+        }
+        return invalid.length() > 0 ? invalid.substring(0, invalid.length() - 2) : "aucun";
     }
 
     /**
@@ -220,28 +328,82 @@ public class FileSyncService {
                         processedFiles.add(relativePath);
 
                         Path destFile = destPath.resolve(relativePath);
+
+                        // Vérifier la longueur du chemin de destination
+                        String destFullPath = destFile.toString();
+                        if (destFullPath.length() > maxPathLength) {
+                            stats.filesExcluded++;
+                            logger.warn("❌ EXCLUSION - Chemin DESTINATION trop long ({} > {} caractères)",
+                                destFullPath.length(), maxPathLength);
+                            logger.info("   Fichier: {}", file.getFileName());
+                            logger.info("   Chemin source: {} caractères", file.toString().length());
+                            logger.info("   Chemin dest: {} caractères", destFullPath.length());
+
+                            exclusionLogger.warn("=== EXCLUSION: CHEMIN DESTINATION TROP LONG ===");
+                            exclusionLogger.info("Fichier: {}", file.getFileName());
+                            exclusionLogger.info("Chemin source: {}", file);
+                            exclusionLogger.info("Longueur source: {} caractères", file.toString().length());
+                            exclusionLogger.info("Chemin destination: {}", truncateString(destFullPath, 200));
+                            exclusionLogger.info("Longueur destination: {} caractères (max: {})", destFullPath.length(), maxPathLength);
+                            exclusionLogger.info("----------------------------------------");
+                            return FileVisitResult.CONTINUE;
+                        }
+
                         stats.filesScanned++;
 
                         FileMetadata existing = existingMetadata.get(relativePath);
                         boolean needsCopy = shouldCopyFile(file, destFile, existing, syncTask.getUseChecksum());
 
                         if (needsCopy) {
-                            // Créer répertoire parent si nécessaire
-                            Files.createDirectories(destFile.getParent());
+                            try {
+                                // Créer répertoire parent si nécessaire
+                                Files.createDirectories(destFile.getParent());
 
-                            // Copier le fichier
-                            Files.copy(file, destFile, StandardCopyOption.REPLACE_EXISTING,
-                                       StandardCopyOption.COPY_ATTRIBUTES);
+                                // Copier le fichier
+                                Files.copy(file, destFile, StandardCopyOption.REPLACE_EXISTING,
+                                           StandardCopyOption.COPY_ATTRIBUTES);
 
-                            if (existing == null) {
-                                stats.filesCopied++;
-                            } else {
-                                stats.filesUpdated++;
+                                if (existing == null) {
+                                    stats.filesCopied++;
+                                } else {
+                                    stats.filesUpdated++;
+                                }
+                                stats.totalBytes += attrs.size();
+
+                                // Mettre à jour les métadonnées
+                                updateFileMetadata(syncTask, relativePath, file, attrs);
+                            } catch (InvalidPathException ipe) {
+                                stats.filesWithErrors++;
+                                logger.error("❌ ERREUR COPIE - InvalidPathException");
+                                logger.info("   Fichier: {}", file.getFileName());
+                                logger.info("   Chemin source: {}", file);
+                                logger.info("   Chemin dest: {}", destFile);
+                                logger.info("   Raison: {}", ipe.getReason());
+                                logger.info("   Message: {}", ipe.getMessage());
+                            } catch (IOException ioe) {
+                                stats.filesWithErrors++;
+                                logger.error("❌ ERREUR COPIE - {} : {}",
+                                    ioe.getClass().getSimpleName(), ioe.getMessage());
+                                logger.info("   Fichier: {}", file.getFileName());
+                                logger.info("   Chemin source: {}", file);
+                                logger.info("   Chemin dest: {}", destFile);
+                                logger.info("   Taille: {} octets", attrs.size());
+                                if (ioe.getMessage() != null && ioe.getMessage().contains("Invalid argument")) {
+                                    logger.warn("   ⚠️  Erreur 'Invalid argument' - Probable:");
+                                    logger.warn("      - Caractères spéciaux dans le nom");
+                                    logger.warn("      - Problème conversion Windows→WSL");
+                                    logger.warn("      - Nom de fichier: {}", file.getFileName());
+                                    logger.warn("      - Caractères suspects: {}", findInvalidChars(file.getFileName().toString()));
+                                }
+                            } catch (Exception e) {
+                                stats.filesWithErrors++;
+                                logger.error("❌ ERREUR COPIE - Exception inattendue: {}", e.getClass().getName());
+                                logger.info("   Fichier: {}", file.getFileName());
+                                logger.info("   Chemin source: {}", file);
+                                logger.info("   Chemin dest: {}", destFile);
+                                logger.info("   Message: {}", e.getMessage());
+                                logger.error("   Stack trace:", e);
                             }
-                            stats.totalBytes += attrs.size();
-
-                            // Mettre à jour les métadonnées
-                            updateFileMetadata(syncTask, relativePath, file, attrs);
                         } else {
                             stats.filesSkipped++;
                         }
@@ -335,6 +497,8 @@ public class FileSyncService {
             finalSyncLog.setFilesUpdated(stats.filesUpdated);
             finalSyncLog.setFilesDeleted(stats.filesDeleted);
             finalSyncLog.setFilesSkipped(stats.filesSkipped);
+            finalSyncLog.setFilesExcluded(stats.filesExcluded);
+            finalSyncLog.setFilesWithErrors(stats.filesWithErrors);
             finalSyncLog.setTotalBytes(stats.totalBytes);
 
             String details = String.format("Synchronisation réussie: %d fichiers traités", stats.filesScanned);
@@ -467,6 +631,8 @@ public class FileSyncService {
             syncLog.setFilesUpdated(stats.filesUpdated);
             syncLog.setFilesDeleted(stats.filesDeleted);
             syncLog.setFilesSkipped(stats.filesSkipped);
+            syncLog.setFilesExcluded(stats.filesExcluded);
+            syncLog.setFilesWithErrors(stats.filesWithErrors);
             syncLog.setTotalBytes(stats.totalBytes);
             syncLog.setDetails(String.format("En cours: %d fichiers scannés...", stats.filesScanned));
             syncLogRepository.save(syncLog);
